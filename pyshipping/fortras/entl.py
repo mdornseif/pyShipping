@@ -212,4 +212,4 @@ class Entladebericht(object):
             elif line[0] == 'W':
                 pass # we happyly ignore W records 
             else:
-                print "unknown %r" % line
+                print "Unknown Fortras ENTL record: %r" % line

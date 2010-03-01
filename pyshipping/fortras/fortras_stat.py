@@ -109,12 +109,13 @@ class Statusmeldung(object):
     def update_sendung(self, sendung_id, datadict):
         """Updates a huLOG Sendung record with the parsed STAT data."""
         import huLOG.models
-        import django.core.exceptions
+        
         try:
-            sendung = huLOG.models.Sendung.objects.get(id=sendung_id)
+            sendung = huLOG.models.Sendung.objects.get(pk=sendung_id)
         except huLOG.models.Sendung.DoesNotExist:
             logging.warning('Problem locating Sendung with id %r for STAT record - ignoring' % sendung_id)
             return
+        
         if datadict['timestamp'] > datetime.datetime.now():
             logging.warning('Future timestamp for Sendung with id %r: %s' % (sendung_id, datadict['timestamp']))
             return
@@ -148,11 +149,14 @@ class Statusmeldung(object):
             info.append(datadict['zusatztext'])
         info.append(str(datadict['timestamp']))
 
-        sendung.logentries.create(displaytext=repr(', '.join(info)),
-                                  sourcedata=repr(datadict),
-                                  source='Maeuler STAT',
-                                  code='200',
-                                  timestamp=datadict['timestamp'])
+        log = sendung.logentries.create()
+        
+        log.displaytext = repr(', '.join(info))
+        log.sourcedata = repr(datadict)
+        log.source = 'Maeuler STAT'
+        log.code = '200',
+        log.timestamp = datadict['timestamp']
+        
         if datadict['sendungsschluessel'] in Statusmeldung.warnstati:
             log.code = '220'
         if datadict['sendungsschluessel'] in Statusmeldung.errorstati:
@@ -160,7 +164,7 @@ class Statusmeldung(object):
         log.save()
         sendung.updated_at = datetime.datetime.now()
 
-        # we only save well known stati
+        # We only save well known status codes
         if datadict['sendungsschluessel'] in ['005', '006', '007', '008', '009', '012', '015', '016', '017',
                                               '018', '031', '040', '050', '054', '055', '063', '068', '069',
                                               '071', '084', '085', '091', '099', '053', '100', '999']:
@@ -178,30 +182,40 @@ class Statusmeldung(object):
 
     def parse(self, data):
         """Parses Fortras STAT data."""
-        lines = data.split('\n')
-        lines = [x.strip('\r') for x in lines]
-        if lines[0] == '' and len(lines) == 1:
-            logging.error('empty file')
+        
+        if data == '':
+            logging.error('Empty file')
             return
-        if not lines[0].startswith('@@PHSTAT128 0128003500107 MAEULER HUDORA1                       '):
-            raise RuntimeError("illegal status data %r" % data[:300])
-        for line in lines[1:]:
+        
+        lines = [x.strip('\r') for x in data.split('\n')]
+        
+        header = lines.pop(0)
+        if not header.startswith('@@PHSTAT128 0128003500107 MAEULER HUDORA1'):
+            raise RuntimeError("Illegal status data %r" % lines[0][:64])
+        
+        for line in lines:
             if not line or line[0] == 'X': # 'X' records and empty lines are ignored
                 continue
+            
             match = re.search(Statusmeldung.q_record_re, line)
             newdict = {}
+            
             if not match:
-                print 'no match', repr(line)
+                logging.info('No match in line %r' % line)
+                continue
+            
             for key, value in match.groupdict().items():
                 newdict[key] = value.strip()
+            
             try:
+                
                 if newdict['time']:
-                    newdict['timestamp'] = datetime.datetime(int(newdict['date'][4:]), int(newdict['date'][2:4]), 
-                                                             int(newdict['date'][:2]), int(newdict['time'][:2]), 
-                                                             int(newdict['time'][2:]))
+                    fmt = "%d%m%Y"
+                    datastr = newdict['date'] + newdict['time']
                 else:
-                    newdict['timestamp'] = datetime.datetime(int(newdict['date'][4:]), int(newdict['date'][2:4]), 
-                                                             int(newdict['date'][:2]))
+                    fmt = "%d%m%Y%H%M"
+                    datastr = newdict['date']                
+                newdict['timestamp'] = datetime.datetime.strptime(datastr, fmt)
             except ValueError:
                 logging.error("malformed timestamp %r|%r" % (newdict['date'], newdict['time']))
                 newdict['timestamp'] = datetime.datetime.now()
