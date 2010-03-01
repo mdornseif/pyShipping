@@ -156,22 +156,23 @@ class Entladebericht(object):
                 info.insert(1, datadict['hinweistext'])
             if datadict['timestamp']:
                 info.append(str(datadict['timestamp']))
-            log = huLOG.models.PackstueckLogentry(packstueck=packstueck)
-            log.displaytext = ', '.join(info)
-            log.sourcedata = repr(datadict)
-            log.source = 'Maeuler ENTL'
-            log.code = '200'
-            log.timestamp = datadict['timestamp']
-            log.save()
+            
+            log = packstueck.logentries.create(
+                       displaytext=', '.join(info),
+                       sourcedata=repr(datadict),
+                       source='Maeuler ENTL',
+                       code='200',
+                       timestamp=datadict['timestamp'])
+
         elif datadict['hinweiscode'] in ['50']:
             info.insert(0, 'Fehlte bei der Entladung')
-            log = huLOG.models.PackstueckLogentry(packstueck=packstueck)
-            log.displaytext = ', '.join(info)
-            log.sourcedata = repr(datadict)
-            log.source = 'Maeuler ENTL'
-            log.code = '500'
-            log.timestamp = datadict['timestamp']
-            log.save()
+
+            log = packstueck.logentries.create(
+                       displaytext=', '.join(info),
+                       sourcedata=repr(datadict),
+                       source='Maeuler ENTL',
+                       code='500',
+                       timestamp = datadict['timestamp'])
         else:
             logging.error('unknown ENTL data: %r (%r)' % (datadict['hinweiscode'], 
                                                           datadict['hinweistext']))

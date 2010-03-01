@@ -147,16 +147,16 @@ class Statusmeldung(object):
         if datadict['zusatztext']:
             info.append(datadict['zusatztext'])
         info.append(str(datadict['timestamp']))
-        log = huLOG.models.SendungLogentry(lieferung = sendung)
-        log.displaytext = repr(', '.join(info))
-        log.sourcedata = repr(datadict)
-        log.source = 'Maeuler STAT'
-        log.code = '200'
+
+        sendung.logentries.create(displaytext=repr(', '.join(info)),
+                                  sourcedata=repr(datadict),
+                                  source='Maeuler STAT',
+                                  code='200',
+                                  timestamp=datadict['timestamp'])
         if datadict['sendungsschluessel'] in Statusmeldung.warnstati:
             log.code = '220'
         if datadict['sendungsschluessel'] in Statusmeldung.errorstati:
-            log.code = '230'        
-        log.timestamp = datadict['timestamp']
+            log.code = '230'
         log.save()
         sendung.updated_at = datetime.datetime.now()
 
