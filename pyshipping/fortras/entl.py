@@ -10,7 +10,8 @@ You may consider this BSD licensed.
 import re
 import logging
 import datetime
-
+import cs.messaging
+QUEUENAME = "hulog.events"
 
 class Entladebericht(object):
     """Parses and represent an ENTL message."""
@@ -137,45 +138,34 @@ class Entladebericht(object):
     
     def update_packstueck(self, nve, datadict):
         """Updates a huLOG Packstueck record with the parsed ENTL data."""
-
-        # TODO: decouple this from huLOG
-        import huLOG.models
-        try:
-            packstueck = huLOG.models.Packstueck.objects.get(_trackingnummer=nve)
-        except huLOG.models.Packstueck.DoesNotExist:
-            logging.warning('Problem locating Packstueck with barcode %r for ENTL record - ignoring' % nve)
-            return
+        
         info = []
         if datadict['terminal']:
             info.append('an Terminal %r' % datadict['terminal'])
         if datadict['benutzer']:
             info.append('gescannt durch Nutzer %r' % datadict['benutzer'])
+        
         if datadict['hinweiscode'] in ['0', '']:
             info.insert(0, 'Bei der Spedition entladen')
             if datadict['hinweistext']:
                 info.insert(1, datadict['hinweistext'])
             if datadict['timestamp']:
                 info.append(str(datadict['timestamp']))
-            
-            log = packstueck.logentries.create(
-                       displaytext=', '.join(info),
-                       sourcedata=repr(datadict),
-                       source='Maeuler ENTL',
-                       code='200',
-                       timestamp=datadict['timestamp'])
-
+            event = {'code': '200', message=', '.join(info)}
         elif datadict['hinweiscode'] in ['50']:
             info.insert(0, 'Fehlte bei der Entladung')
-
-            log = packstueck.logentries.create(
-                       displaytext=', '.join(info),
-                       sourcedata=repr(datadict),
-                       source='Maeuler ENTL',
-                       code='500',
-                       timestamp = datadict['timestamp'])
+            event = {'code': '500', message=', '.join(info)}
         else:
-            logging.error('unknown ENTL data: %r (%r)' % (datadict['hinweiscode'], 
-                                                          datadict['hinweistext']))
+            logging.error('unknown ENTL data: %r (%r)' % (datadict['hinweiscode'], datadict['hinweistext']))
+            return
+        
+        doc = cs.messaging.empty_message('pyShipping.fortras.entl')
+        doc.update({'type': 'P', 'designator': nve})
+        doc.update(event)
+        doc.update(datadict)
+        
+        chan = cs.messaging.setup_queue(QUEUENAME, durable=True)
+        cs.messaging.publish(doc, QUEUENAME, chan=chan)
         
     def parse(self, data):
         """Parses Fortras ENTL data."""
@@ -185,6 +175,8 @@ class Entladebericht(object):
         for line in lines[1:]:
             line = line.strip('\r')
             if not line:
+                continue
+            if line.startswith("@@PT "):
                 continue
             if line[0] == 'M':
                 match = re.search(Entladebericht.m_record_re, line)

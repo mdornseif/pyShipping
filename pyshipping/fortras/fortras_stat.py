@@ -10,6 +10,8 @@ You may consider this BSD licensed.
 import re
 import datetime
 import logging
+import cs.messaging
+QUEUENAME = "hulog.events"
 
 
 class Statusmeldung(object):
@@ -108,13 +110,12 @@ class Statusmeldung(object):
     
     def update_sendung(self, sendung_id, datadict):
         """Updates a huLOG Sendung record with the parsed STAT data."""
-        import huLOG.models
         
-        try:
-            sendung = huLOG.models.Sendung.objects.get(pk=sendung_id)
-        except huLOG.models.Sendung.DoesNotExist:
-            logging.warning('Problem locating Sendung with id %r for STAT record - ignoring' % sendung_id)
-            return
+        # try:
+        #     sendung = huLOG.models.Sendung.objects.get(pk=sendung_id)
+        # except huLOG.models.Sendung.DoesNotExist:
+        #     logging.warning('Problem locating Sendung with id %r for STAT record - ignoring' % sendung_id)
+        #     return
         
         if datadict['timestamp'] > datetime.datetime.now():
             logging.warning('Future timestamp for Sendung with id %r: %s' % (sendung_id, datadict['timestamp']))
@@ -149,37 +150,38 @@ class Statusmeldung(object):
             info.append(datadict['zusatztext'])
         info.append(str(datadict['timestamp']))
 
-        log = sendung.logentries.create()
-        
-        log.displaytext = repr(', '.join(info))
-        log.sourcedata = repr(datadict)
-        log.source = 'Maeuler STAT'
-        log.code = '200',
-        log.timestamp = datadict['timestamp']
-        
+        event = {'code': 200, 'source': 'Maeuler STAT'}
+        event.update(datadict)
         if datadict['sendungsschluessel'] in Statusmeldung.warnstati:
-            log.code = '220'
+            event['code'] = '220'
         if datadict['sendungsschluessel'] in Statusmeldung.errorstati:
-            log.code = '230'
-        log.save()
-        sendung.updated_at = datetime.datetime.now()
-
+            event['code'] = '230'
+        
+        # XXX:
+        doc = cs.messaging.empty_message('pyShipping.fortras.fortras_stat')
+        doc.update({'type': 'L', 'designator': sendung_id})
+        doc.update(event)
+        
+        chan = cs.messaging.setup_queue(QUEUENAME, durable=True)
+        cs.messaging.publish(doc, QUEUENAME, chan=chan)
+        
         # We only save well known status codes
         if datadict['sendungsschluessel'] in ['005', '006', '007', '008', '009', '012', '015', '016', '017',
                                               '018', '031', '040', '050', '054', '055', '063', '068', '069',
                                               '071', '084', '085', '091', '099', '053', '100', '999']:
-            if datadict['sendungsnrempfaenger']:
-                if (sendung.speditionsauftragsnummer 
-                  and sendung.speditionsauftragsnummer != datadict['sendungsnrempfaenger']):
-                    logging.error('Problem with Sendung %r: original speditionsauftragsnummer %r replaced by %r' % (sendung, sendung.speditionsauftragsnummer, datadict['sendungsnrempfaenger']))
-                sendung.speditionsauftragsnummer = datadict['sendungsnrempfaenger']
+            pass
+            # Ist das nötig?
+            # if datadict['sendungsnrempfaenger']:
+            #     if (sendung.speditionsauftragsnummer 
+            #       and sendung.speditionsauftragsnummer != datadict['sendungsnrempfaenger']):
+            #         logging.error('Problem with Sendung %r: original speditionsauftragsnummer %r replaced by %r' % (sendung, sendung.speditionsauftragsnummer, datadict['sendungsnrempfaenger']))
+            #     sendung.speditionsauftragsnummer = datadict['sendungsnrempfaenger']
         else:
             logging.error('unknown STAT data for record %r: %r (%r|%r)' % (datadict['sendungsnrversender'],
                                                                            datadict['sendungsschluessel'], 
                                                                            datadict['statustext'],
                                                                            datadict['zusatztext']))
-        sendung.save()
-
+    
     def parse(self, data):
         """Parses Fortras STAT data."""
         
